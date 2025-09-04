@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Disclaimer Auditor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 920px; margin: 40px auto; padding: 0 16px; }
+    header { margin-bottom: 24px; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin: 16px 0; }
+    .row { display: flex; gap: 12px; align-items: center; }
+    .row input[type=file] { flex: 1; }
+    .btn { padding: 10px 14px; border-radius: 10px; border: 1px solid #111827; background: #111827; color: white; cursor: pointer; }
+    pre { background: #0b1020; color: #d1d5db; padding: 12px; border-radius: 8px; overflow: auto; }
+    .badge { display: inline-block; padding: 4px 8px; border-radius: 9999px; font-size: 12px; color: white; }
+    .PASS { background: #10b981; }
+    .FAIL { background: #ef4444; }
+    .NEEDS_REVIEW { background: #f59e0b; }
+    .small { color: #6b7280; font-size: 12px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Disclaimer Auditor (MVP)</h1>
+  <p class="small">Upload a call recording and get a PASS/FAIL/NEEDS_REVIEW verdict with evidence. Policy is configurable in <code>policy/policy_disclaimer.yml</code>.</p>
+</header>
+
+<section class="card">
+  <form id="upload-form">
+    <div class="row">
+      <input type="file" id="audio" accept="audio/*" required>
+      <button class="btn" type="submit">Analyze</button>
+    </div>
+    <div style="margin-top:8px">
+      <label for="language" class="small">Language hint (optional):</label>
+      <input id="language" name="language" placeholder="en / ro / ru / ...">
+    </div>
+  </form>
+</section>
+
+<section id="result"></section>
+
+<script>
+const form = document.getElementById('upload-form');
+const resultEl = document.getElementById('result');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const file = document.getElementById('audio').files[0];
+  const lang = document.getElementById('language').value || '';
+  if(!file) return;
+
+  const data = new FormData();
+  data.append('file', file);
+  data.append('language', lang);
+
+  resultEl.innerHTML = '<div class="card">Processing... this may take a while on first run (model downloads).</div>';
+
+  const r = await fetch('/analyze', { method: 'POST', body: data });
+  const j = await r.json();
+
+  const badge = `<span class="badge ${j.verdict}">${j.verdict}</span>`;
+  let breakdownHtml = '';
+  for (const [k,v] of Object.entries(j.breakdown)) {
+    const ev = j.evidence[k] || [];
+    const quotes = ev.map(e => `<li>"${e.quote}"</li>`).join('');
+    breakdownHtml += `
+      <div class="card">
+        <h4>${k}</h4>
+        <div class="grid">
+          <div>
+            <div class="small">Keyword score: ${v.kw.toFixed(2)}</div>
+            <div class="small">Similarity: ${v.sim.toFixed(3)} (mapped: ${v.sim_score.toFixed(2)})</div>
+            <div class="small">LLM score: ${v.llm.toFixed(2)}</div>
+          </div>
+          <div>
+            <div class="small">Top evidence:</div>
+            <ul>${quotes}</ul>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  resultEl.innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content: space-between;">
+        <div><strong>Score:</strong> ${j.score.toFixed(3)} &nbsp; ${badge}</div>
+        <div class="small">Transcript chars: ${j.transcript_chars} | Whisper: ${j.model_info.whisper_model} | Embeddings: ${j.model_info.embedding_model} | LLM: ${j.model_info.use_llm_extractor}</div>
+      </div>
+    </div>
+    ${breakdownHtml}
+    <div class="card"><pre>${JSON.stringify(j, null, 2)}</pre></div>
+  `;
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,179 @@
+version: "1.0"
+policy_name: "travel_agency_disclaimer"
+
+requirements:
+  - id: contact_us_changes_24_7
+    anchors:
+      - "contact us only"
+      - "reach me directly"
+      - "call me directly"
+      - "please call me directly"
+      - "for any changes or cancellations please call me directly"
+      - "for any changes or cancelations please call me directly"
+      - "reach me directly for requests"
+      - "customer support 24/7"
+      - "contact us for assistance"
+      - "reach out to us for help"
+      - "get in touch with us"
+      - "please contact us for any inquiries"
+    weight: 0.18
+    description: "For changes/cancellations or any other requests, the client must contact the agent directly or the 24/7 customer support."
+    keywords:
+      - "changes"
+      - "cancellations"
+      - "cancelations"
+      - "any other requests"
+      - "call me directly"
+      - "reach me directly"
+      - "contact me directly"
+      - "customer support"
+      - "24/7"
+      - "reach out to us"
+    canonical_examples:
+      - "For any changes or cancellations or any other requests please call/reach me directly."
+      - "If you need to make any changes or cancellations, please contact me directly or our customer support; it's available 24/7."
+
+  - id: corporate_miles_discount
+    anchors:
+      - "corporate points"
+      - "corporate miles"
+      - "discounted ticket"
+      - "non-fare tickets"
+      - "non-fare ticket"
+      - "highly discounted"
+      - "corporate fare"
+      - "issued on corporate miles"
+      - "corporate ticket"
+      - "coupons"
+      - "vouchers"
+    weight: 0.18
+    description: "Explain that the ticket is non-fare/discounted because it is issued on corporate miles, points, coupons, or vouchers."
+    keywords:
+      - "corporate miles"
+      - "corporate points"
+      - "booked with corporate miles"
+      - "issued with corporate points"
+      - "non-fare tickets"
+      - "non-fare ticket"
+      - "coupons"
+      - "vouchers"
+      - "highly discounted"
+      - "corporate account"
+    canonical_examples:
+      - "These are non-fare tickets issued with corporate points, coupons and vouchers."
+      - "It's a highly discounted ticket since it's booked with our corporate miles."
+
+  - id: no_miles_accrual
+    anchors:
+      - "no miles"
+      - "miles won't accrue"
+      - "won't accrue miles"
+      - "not eligible for miles"
+      - "can't earn miles"
+      - "no points"
+      - "will not be able to collect miles"
+      - "no bonuses"
+      - "no promos"
+      - "no airline discounts"
+    weight: 0.18
+    description: "Inform the client that the ticket will not accrue miles, points, or other airline bonuses/promos."
+    keywords:
+      - "no miles"
+      - "won't accrue miles"
+      - "can't earn miles"
+      - "no points"
+      - "no bonuses"
+      - "no promos"
+      - "no airline discounts"
+      - "mileage booking not eligible"
+      - "points will not be credited"
+    negative_keywords:
+      - "eligible for miles"
+      - "will earn miles"
+      - "can earn miles"
+      - "accrue miles"
+      - "miles will be credited"
+      - "eligible for points"
+      - "collect miles"
+    require_negative_polarity: true
+    canonical_examples:
+      - "This means you will not be able to collect/accrue miles or benefit from other bonuses, promos or discounts provided by the airlines themselves."
+      - "No frequent flyer miles will be credited on this booking."
+
+  - id: no_personal_info
+    anchors:
+      - "do not add frequent flyer"
+      - "do not link personal info"
+      - "do not add your personal info"
+      - "do not add your phone"
+      - "do not add your email"
+      - "do not change the email"
+      - "do not change the phone"
+    weight: 0.22
+    description: "The client must not link or add personal information to the booking (email, phone, frequent flyer)."
+    keywords:
+      - "do not add your personal info"
+      - "don't add your email"
+      - "don't add your phone"
+      - "no frequent flyer number"
+      - "no FFP"
+      - "personal information"
+      - "avoid adding personal contact"
+      - "please do not link any personal information"
+      - "do not link phone or email"
+      - "an attempt to link personal frequent flyer info may cause suspension"
+    canonical_examples:
+      - "Please do not link any personal information to the booking such as telephone or email."
+      - "An attempt to link any personal frequent flyer information, email or phone number to the tickets may result in technical discrepancies that may cause the tickets to be suspended."
+
+  - id: keep_agency_contacts
+    anchors:
+      - "booking is linked to our email"
+      - "email and phone are ours"
+      - "keep our email"
+      - "keep our phone"
+      - "keep our contact"
+      - "do not change our contacts"
+    weight: 0.15
+    description: "The booking is linked to agency contacts and must remain unchanged."
+    keywords:
+      - "the email and phone inside the booking is ours"
+      - "do not change it"
+      - "keep our contact"
+      - "our agency email"
+      - "our agency phone"
+      - "booking is linked to our email"
+      - "do not change the email and phone"
+      - "leave our contact details unchanged"
+    canonical_examples:
+      - "The booking is linked to our email and we will update you on any changes."
+      - "The email and phone number inside the booking are ours; please do not change them."
+
+  - id: do_not_contact_airline
+    anchors:
+      - "do not contact the airline"
+      - "do not call the airline"
+      - "under no circumstances contact the airline"
+      - "please avoid airline contact"
+      - "do not reach out to the carrier"
+    weight: 0.15
+    description: "The client must not contact the airline company directly."
+    keywords:
+      - "do not contact the airline"
+      - "do not call the airline"
+      - "under no circumstances contact the airline"
+      - "please avoid airline contact"
+      - "do not reach out to the carrier"
+    canonical_examples:
+      - "Do not contact the airline company under any circumstances."
+      - "Please do not reach out to the airline directly."
+
+scoring:
+  weights:
+    kw: 0.3
+    sim: 0.4
+    llm: 0.4
+  similarity_threshold_ok: 0.55
+  similarity_threshold_strong: 0.70
+  pass_threshold: 85
+  review_threshold: 70
