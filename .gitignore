@@ -11,3 +11,8 @@ outputs/*
 *.m4a
 *.ogg
 *.flac
+.env
+.DS_Store
+__pycache__/
+*.pyc
+outputs/
