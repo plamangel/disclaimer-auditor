@@ -1,6 +1,6 @@
 from typing import Dict, Any, List, Sequence
 from sentence_transformers import SentenceTransformer, util
-from .utils import split_sentences, split_sentences_with_times
+from .utils import split_sentences
 import numpy as np
 import re
 
@@ -155,7 +155,6 @@ def score_requirement(req: Dict[str, Any], agent_text: str, extractor_flags: Dic
     # 1.1) anchor-based candidate indices
     anchors = (req or {}).get("anchors", [])
     idx_candidates = select_candidates(sentences, anchors, max_candidates=128)
-    candidates = [sentences[i] for i in idx_candidates]
 
     # 1.2) keyword polarity on candidates
     neg_kw = req.get("negative_keywords", [])

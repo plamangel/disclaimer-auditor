@@ -1,6 +1,5 @@
 import yaml
 from typing import Any, Dict, List
-import numpy as np
 from .embeddings import get_embed_model
 
 def _precompute_example_embeddings(policy: Dict[str, Any]) -> None:
