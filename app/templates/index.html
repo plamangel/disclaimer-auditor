@@ -1,138 +1,281 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8" />
   <title>Disclaimer Auditor</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 920px; margin: 40px auto; padding: 0 16px; }
-    header { margin-bottom: 24px; }
-    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin: 16px 0; }
-    .row { display: flex; gap: 12px; align-items: center; }
-    .row input[type=file] { flex: 1; }
-    .btn { padding: 10px 14px; border-radius: 10px; border: 1px solid #111827; background: #111827; color: white; cursor: pointer; }
-    pre { background: #0b1020; color: #d1d5db; padding: 12px; border-radius: 8px; overflow: auto; }
-    .badge { display: inline-block; padding: 4px 8px; border-radius: 9999px; font-size: 12px; color: white; }
-    .PASS { background: #10b981; }
-    .FAIL { background: #ef4444; }
-    .NEEDS_REVIEW { background: #f59e0b; }
-    .small { color: #6b7280; font-size: 12px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color: #111; }
+    .card { max-width: 880px; margin: 0 auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.04); }
+    .card > .section { padding: 16px 20px; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .btn { appearance: none; border: 0; background: #111827; color: #fff; padding: 10px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+    .btn[disabled] { opacity: 0.6; cursor: not-allowed; }
+    .muted { color: #6b7280; font-size: 14px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    /* Progress bar */
+    .progress-wrap { margin-top: 10px; }
+    .progress-bar { height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
+    .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #3b82f6, #2563eb); transition: width 0.15s ease; }
+    .progress-meta { display: flex; justify-content: space-between; font-size: 13px; color: #374151; margin-top: 6px; }
+    .hidden { display: none; }
+
+    /* Evidence list */
+    .ev { margin-top: 6px; }
+    .ev h4 { margin: 16px 0 6px 0; }
+    .tag { display:inline-flex; align-items:center; gap:6px; border:1px solid #e5e7eb; padding:4px 8px; border-radius:999px; font-size:12px; color:#374151; }
+    .timestamp { color:#2563eb; cursor:pointer; text-decoration: underline; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    @media (max-width: 900px){ .grid{ grid-template-columns: 1fr; } }
+    .pre { white-space: pre-wrap; background:#f9fafb; border:1px solid #e5e7eb; border-radius:12px; padding:12px; font-size:13px; }
   </style>
 </head>
 <body>
-<header>
-  <h1>Disclaimer Auditor (MVP)</h1>
-  <p class="small">Upload a call recording and get a PASS/FAIL/NEEDS_REVIEW verdict with evidence. Policy is configurable in <code>policy/policy_disclaimer.yml</code>.</p>
-</header>
-
-<section class="card">
-  <form id="upload-form">
-    <div class="row">
-      <input type="file" id="audio" accept="audio/*" required>
-      <button class="btn" type="submit">Analyze</button>
+  <div class="card">
+    <div class="section">
+      <h2>Disclaimer Auditor</h2>
+      <p class="muted">Upload an audio file, then analyze. The progress bar shows upload and processing progress with an estimated time remaining.</p>
     </div>
-    <div style="margin-top:8px">
-      <label for="language" class="small">Language hint (optional):</label>
-      <input id="language" name="language" placeholder="en / ro / ru / ...">
+    <div class="section">
+      <div class="row">
+        <input id="audio" type="file" accept="audio/*" />
+        <select id="language">
+          <option value="">Auto language</option>
+          <option value="en">English</option>
+          <option value="ro">Romanian</option>
+          <option value="ru">Russian</option>
+        </select>
+        <button id="analyzeBtn" type="button" class="btn">Analyze</button>
+      </div>
+
+      <!-- Progress UI -->
+      <div id="progressWrap" class="progress-wrap hidden">
+        <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+        <div class="progress-meta">
+          <span id="progressLabel" class="mono">0%</span>
+          <span id="progressEta" class="mono">ETA —</span>
+        </div>
+        <div class="muted" id="progressPhase" style="margin-top:4px;">Idle</div>
+      </div>
+
+      <!-- Audio preview -->
+      <div id="audioPreview" class="hidden" style="margin-top:12px;">
+        <audio id="player" controls style="width:100%;"></audio>
+      </div>
     </div>
-  </form>
-</section>
 
-<section class="card">
-  <audio id="player" controls style="width:100%"></audio>
-  <div class="small">Tip: click a timestamp in the evidence list to jump here.</div>
-</section>
+    <div class="section">
+      <div id="result"></div>
+    </div>
+  </div>
 
-<section id="result"></section>
+  <script>
+    const $ = (s) => document.querySelector(s);
+    const audioInput = $("#audio");
+    const langInput = $("#language");
+    const analyzeBtn = $("#analyzeBtn");
+    const player = $("#player");
+    const audioPreview = $("#audioPreview");
 
-<script>
-const form = document.getElementById('upload-form');
-const resultEl = document.getElementById('result');
-const fileInput = document.getElementById('audio');
-const player = document.getElementById('player');
+    // Progress elements
+    const progressWrap = $("#progressWrap");
+    const progressFill = $("#progressFill");
+    const progressLabel = $("#progressLabel");
+    const progressEta = $("#progressEta");
+    const progressPhase = $("#progressPhase");
 
-function msToMMSS(ms) {
-  if (ms == null || isNaN(ms)) return '';
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m.toString().padStart(2,'0')}:${r.toString().padStart(2,'0')}`;
-}
+    const result = $("#result");
 
-fileInput.addEventListener('change', () => {
-  const f = fileInput.files[0];
-  if (f) {
-    const url = URL.createObjectURL(f);
-    player.src = url;
-  }
-});
+    // Rolling average duration storage
+    const AVG_KEY = "avgAnalysisMs";
+    function getAvgMs() {
+      const v = Number(localStorage.getItem(AVG_KEY) || "0");
+      return Number.isFinite(v) && v > 0 ? v : 8000; // default 8s if unknown
+    }
+    function updateAvgMs(lastMs) {
+      const prev = getAvgMs();
+      const alpha = 0.3; // EMA smoothing
+      const next = Math.round(alpha * lastMs + (1 - alpha) * prev);
+      localStorage.setItem(AVG_KEY, String(next));
+    }
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const file = document.getElementById('audio').files[0];
-  const lang = document.getElementById('language').value || '';
-  if(!file) return;
+    function fmtMs(ms) {
+      const s = Math.max(0, Math.ceil(ms / 1000));
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return m > 0 ? `${m}m ${r}s` : `${r}s`;
+    }
 
-  const data = new FormData();
-  data.append('file', file);
-  data.append('language', lang);
+    function setProgress(pct, phaseText) {
+      const clamped = Math.max(0, Math.min(100, pct));
+      progressFill.style.width = clamped + "%";
+      progressLabel.textContent = clamped + "%";
+      if (phaseText) progressPhase.textContent = phaseText;
+    }
 
-  resultEl.innerHTML = '<div class="card">Processing... this may take a while on first run (model downloads).</div>';
+    function setEta(etaMs) {
+      progressEta.textContent = `ETA ${fmtMs(etaMs)}`;
+    }
 
-  const r = await fetch('/analyze', { method: 'POST', body: data });
-  const j = await r.json();
+    function showProgress(show) {
+      progressWrap.classList.toggle("hidden", !show);
+    }
 
-  const badge = `<span class="badge ${j.verdict}">${j.verdict}</span>`;
-  let breakdownHtml = '';
-  for (const [k,v] of Object.entries(j.breakdown)) {
-    const ev = j.evidence[k] || [];
-    const quotes = ev.map(e => {
-      const ts = (e.start_ms !== null && e.start_ms !== undefined) ? msToMMSS(e.start_ms) : '';
-      const tsHtml = ts ? `<button type="button" class="jump" data-start="${Math.floor((e.start_ms||0)/1000)}">${ts}</button>` : '';
-      const q = (e.quote || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      return `<li>${tsHtml} <span>"${q}"</span></li>`;
-    }).join('');
-    breakdownHtml += `
-      <div class="card">
-        <h4>${k}</h4>
+    // Clickable timestamps in mm:ss -> seek in audio
+    function fmtTime(t) {
+      const mm = String(Math.floor(t / 60)).padStart(2, "0");
+      const ss = String(Math.floor(t % 60)).padStart(2, "0");
+      return `${mm}:${ss}`;
+    }
+    function renderEvidence(evidence_map) {
+      const container = document.createElement("div");
+      container.className = "ev";
+      for (const [rid, arr] of Object.entries(evidence_map || {})) {
+        const sec = document.createElement("div");
+        sec.innerHTML = `<h4>${rid}</h4>`;
+        (arr || []).forEach(ev => {
+          const t0 = (ev.start_ms ?? 0) / 1000;
+          const t1 = (ev.end_ms ?? 0) / 1000;
+          const p = document.createElement("p");
+          const ts = isFinite(t0) && t0 > 0 ? `<span class="timestamp" data-t="${t0}">${fmtTime(t0)}</span>` : "";
+          p.innerHTML = `${ts} — ${ev.quote || ""}`;
+          sec.appendChild(p);
+        });
+        container.appendChild(sec);
+      }
+      // delegate click -> seek
+      container.addEventListener("click", (e) => {
+        const el = e.target.closest(".timestamp");
+        if (!el) return;
+        const t = Number(el.dataset.t || "0");
+        if (player && isFinite(t)) {
+          player.currentTime = t;
+          player.play().catch(() => {});
+        }
+      });
+      return container;
+    }
+
+    // Main analyze flow with XHR (to capture upload progress)
+    analyzeBtn.addEventListener("click", async (evt) => {
+      if (evt && typeof evt.preventDefault === "function") evt.preventDefault();
+      const f = audioInput.files && audioInput.files[0];
+      if (!f) {
+        alert("Please choose an audio file.");
+        return;
+      }
+
+      // Audio preview
+      const url = URL.createObjectURL(f);
+      player.src = url;
+      audioPreview.classList.remove("hidden");
+
+      // Build form data
+      const fd = new FormData();
+      fd.append("audio", f, f.name);
+      if (langInput.value) fd.append("language", langInput.value);
+
+      analyzeBtn.disabled = true;
+      result.innerHTML = "";
+      showProgress(true);
+      setProgress(0, "Preparing upload…");
+      setEta(getAvgMs());
+
+      const avgMs = getAvgMs();
+      const tStart = Date.now();
+
+      // optimistic processing progress while waiting for server response
+      let optimisticTimer = null;
+      const startOptimisticProgress = () => {
+        // Start from 30% up to 99% while waiting
+        let pct = 30;
+        optimisticTimer = setInterval(() => {
+          const elapsed = Date.now() - tStart;
+          const remain = Math.max(0, avgMs - elapsed);
+          setEta(remain);
+          pct = Math.min(99, 30 + Math.floor((elapsed / Math.max(2000, avgMs)) * 69));
+          setProgress(pct, "Processing… (transcribe + scoring)");
+        }, 200);
+      };
+
+      // Use XHR to capture upload progress
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/analyze");
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const upPct = Math.round((e.loaded / e.total) * 30); // 0..30%
+          setProgress(upPct, "Uploading…");
+        } else {
+          setProgress(10, "Uploading…");
+        }
+      };
+
+      xhr.onloadstart = () => {
+        // after upload starts, begin optimistic processing progress
+        startOptimisticProgress();
+      };
+
+      xhr.onreadystatechange = () => {
+        if (xhr.readyState === 4) {
+          if (optimisticTimer) { clearInterval(optimisticTimer); optimisticTimer = null; }
+          const elapsed = Date.now() - tStart;
+          updateAvgMs(elapsed);
+          setEta(0);
+          setProgress(100, "Done");
+
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              renderResult(data);
+            } catch (err) {
+              result.innerHTML = `<p class="mono" style="color:#b91c1c;">Failed to parse response JSON.</p>`;
+            }
+          } else {
+            result.innerHTML = `<p class="mono" style="color:#b91c1c;">Server error: ${xhr.status}</p>`;
+          }
+          analyzeBtn.disabled = false;
+        }
+      };
+
+      xhr.onerror = () => {
+        if (optimisticTimer) { clearInterval(optimisticTimer); optimisticTimer = null; }
+        analyzeBtn.disabled = false;
+        setProgress(0, "Idle");
+        setEta(0);
+        result.innerHTML = `<p class="mono" style="color:#b91c1c;">Network error.</p>`;
+      };
+
+      xhr.send(fd);
+    });
+
+    function renderResult(data) {
+      const { score, verdict, breakdown, evidence, transcript, model_info } = data || {};
+      const s = Number(score || 0);
+      const pct = Math.round(s * 100);
+
+      const header = document.createElement("div");
+      header.innerHTML = `
         <div class="grid">
           <div>
-            <div class="small">Keyword score: ${v.kw.toFixed(2)}</div>
-            <div class="small">Similarity: ${v.sim.toFixed(3)} (mapped: ${v.sim_score.toFixed(2)})</div>
-            <div class="small">LLM score: ${v.llm.toFixed(2)}</div>
+            <h3>Summary</h3>
+            <p><strong>Score:</strong> ${pct}/100</p>
+            <p><strong>Verdict:</strong> ${verdict || "-"}</p>
+            <p class="muted"><strong>Model:</strong> ${model_info?.model || "-"} (${model_info?.device || "-"}, ${model_info?.compute_type || "-"})</p>
           </div>
           <div>
-            <div class="small">Top evidence:</div>
-            <ul>${quotes}</ul>
+            <h3>Transcript</h3>
+            <div class="pre" style="max-height:180px; overflow:auto;">${(transcript || "").replace(/</g,"&lt;")}</div>
           </div>
         </div>
-      </div>
-    `;
-  }
+      `;
 
-  resultEl.innerHTML = `
-    <div class="card">
-      <div class="row" style="justify-content: space-between;">
-        <div><strong>Score:</strong> ${j.score.toFixed(3)} &nbsp; ${badge}</div>
-        <div class="small">Transcript chars: ${j.transcript_chars} | Whisper: ${j.model_info.whisper_model} | Embeddings: ${j.model_info.embedding_model} | LLM: ${j.model_info.use_llm_extractor}</div>
-      </div>
-    </div>
-    ${breakdownHtml}
-    <div class="card"><pre>${JSON.stringify(j, null, 2)}</pre></div>
-  `;
-  // Enable click-to-seek on timestamp buttons
-  resultEl.querySelectorAll('button.jump').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const startSec = parseInt(btn.getAttribute('data-start') || '0', 10);
-      if (!isNaN(startSec)) {
-        try { player.currentTime = startSec; player.play(); } catch (_) {}
-      }
-    });
-  });
-});
-</script>
-
+      const ev = renderEvidence(evidence || {});
+      result.innerHTML = "";
+      result.appendChild(header);
+      result.appendChild(ev);
+    }
+  </script>
 </body>
 </html>

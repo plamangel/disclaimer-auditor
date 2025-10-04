@@ -2,13 +2,13 @@ import os
 import json
 from typing import Dict, Any, Optional
 import requests
+from .cache import make_key, get_cached, put_cached
 
 # -------- Speed/robustness knobs --------
 MAX_TRANSCRIPT_CHARS = int(os.environ.get("LLM_MAX_TRANSCRIPT_CHARS", "4000"))
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "60"))
 OPENAI_TIMEOUT = int(os.environ.get("OPENAI_TIMEOUT", "60"))
 OPENAI_MODEL_DEFAULT = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-
 
 def _truncate_center(text: str, max_len: int) -> str:
     """Keep head+tail to preserve intro + conclusion; speeds up LLM."""
@@ -18,10 +18,8 @@ def _truncate_center(text: str, max_len: int) -> str:
     tail = max_len - head
     return text[:head] + "\n...\n" + text[-tail:]
 
-
 def _compact_ids(policy: Dict[str, Any]) -> str:
     return ", ".join([r["id"] for r in policy.get("requirements", [])])
-
 
 def _safe_json(s: str) -> Optional[Dict[str, str]]:
     try:
@@ -36,7 +34,6 @@ def _safe_json(s: str) -> Optional[Dict[str, str]]:
             except Exception:
                 return None
         return None
-
 
 def _build_prompt(agent_text: str, policy: Dict[str, Any]) -> str:
     ids = _compact_ids(policy)
@@ -72,9 +69,7 @@ AGENT transcript:
 """.strip()
     return header + "\n" + agent_text
 
-
 # ----------------- Ollama path (local, fast) -----------------
-
 def _ollama_extract(text: str, policy: Dict[str, Any], model_name: str) -> Optional[Dict[str, str]]:
     prompt = _build_prompt(_truncate_center(text, MAX_TRANSCRIPT_CHARS), policy)
     try:
@@ -100,9 +95,7 @@ def _ollama_extract(text: str, policy: Dict[str, Any], model_name: str) -> Optio
     except Exception:
         return None
 
-
 # ----------------- OpenAI path (fallback) -----------------
-
 def _openai_extract(text: str, policy: Dict[str, Any]) -> Optional[Dict[str, str]]:
     from openai import OpenAI
     client = OpenAI(timeout=OPENAI_TIMEOUT)
@@ -125,21 +118,32 @@ def _openai_extract(text: str, policy: Dict[str, Any]) -> Optional[Dict[str, str
     except Exception:
         return None
 
-
 def extract_flags(agent_text: str, policy: Dict[str, Any]) -> Dict[str, str]:
+    # simple cache key: transcript + policy_name
+    policy_name = policy.get("policy_name", "")
+    key = make_key(agent_text, policy_name)
+    cached = get_cached(key)
+    if isinstance(cached, dict) and cached:
+        # cache hit
+        return cached  # type: ignore[return-value]
+
     if os.environ.get("USE_LLM_EXTRACTOR", "false").lower() == "true":
         # Ollama first if configured
         model_name = os.environ.get("OLLAMA_MODEL", "").strip()
         if model_name:
             out = _ollama_extract(agent_text, policy, model_name)
             if isinstance(out, dict):
+                put_cached(key, out)
                 return out
 
         # OpenAI fallback if API key is present
         if os.environ.get("OPENAI_API_KEY"):
             out = _openai_extract(agent_text, policy)
             if isinstance(out, dict):
+                put_cached(key, out)
                 return out
 
     # default: mark all as 'unclear'
-    return {r["id"]: "unclear" for r in policy.get("requirements", [])}
+    res = {r["id"]: "unclear" for r in policy.get("requirements", [])}
+    put_cached(key, res)
+    return res
