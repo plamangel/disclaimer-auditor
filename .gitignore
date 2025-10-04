@@ -1,18 +1,33 @@
+# Virtual env & Python caches
 .venv/
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+
+# Local cache & logs
+.cache/
+*.log
+
+# OS files
+.DS_Store
+
+# Environment config (never commit secrets)
 .env
-outputs/*
-!.gitkeep
+
+# Build / outputs (keep placeholder if needed)
+outputs/
+!outputs/.gitkeep
+
+# Sample / media inputs
 *.mp3
 *.wav
 *.m4a
 *.ogg
 *.flac
-.env
-.DS_Store
-__pycache__/
-*.pyc
-outputs/
+
+# Editor / IDE configs
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.bak
