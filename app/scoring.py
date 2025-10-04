@@ -1,6 +1,6 @@
-from typing import Dict, Any, List, Tuple, Sequence
+from typing import Dict, Any, List, Sequence
 from sentence_transformers import SentenceTransformer, util
-from .utils import split_sentences
+from .utils import split_sentences, split_sentences_with_times
 import numpy as np
 import re
 
@@ -39,16 +39,16 @@ def matches_anchors(sentence: str, anchors: Sequence[str]) -> bool:
             return True
     return False
 
-def select_candidates(sentences: List[str], anchors: Sequence[str], max_candidates: int = 128) -> List[str]:
+def select_candidates(sentences: List[str], anchors: Sequence[str], max_candidates: int = 128) -> List[int]:
     """
-    Filters sentences by anchors; falls back to all sentences if none matched.
+    Returns indices of sentences that match anchors; falls back to all indices if none matched.
     """
     if not sentences:
         return []
-    cand = [s for s in sentences if matches_anchors(s, anchors or [])]
-    if not cand:
-        cand = sentences  # fallback to avoid missing everything
-    return cand[:max_candidates]
+    idxs = [i for i, s in enumerate(sentences) if matches_anchors(s, anchors or [])]
+    if not idxs:
+        idxs = list(range(len(sentences)))  # fallback to avoid missing everything
+    return idxs[:max_candidates]
 
 
 # -----------------------------
@@ -109,61 +109,84 @@ def score_requirement(req: Dict[str, Any], agent_text: str, extractor_flags: Dic
     w_sim = float(weights_cfg.get("sim", 0.4))
     w_llm = float(weights_cfg.get("llm", 0.3))
 
-    # 1) semantic candidates via ANCHORS (used across all dimensions)
-    agent_sents = split_sentences(agent_text)
-    anchors = (req or {}).get("anchors", [])
-    candidates = select_candidates(agent_sents, anchors, max_candidates=128)
+    # 1) sentences & optional times bundle
+    sent_time_bundle = policy_scoring.get("_sentence_times_bundle") if isinstance(policy_scoring, dict) else None
+    if sent_time_bundle and sent_time_bundle.get("sentences") and sent_time_bundle.get("times"):
+        sentences = sent_time_bundle["sentences"]
+        sentence_times = sent_time_bundle["times"]
+    else:
+        sentences = split_sentences(agent_text)
+        sentence_times = [(None, None) for _ in sentences]
 
-    # 1.1) keywords with polarity (positive/negative) control, evaluated on candidates
+    # 1.1) anchor-based candidate indices
+    anchors = (req or {}).get("anchors", [])
+    idx_candidates = select_candidates(sentences, anchors, max_candidates=128)
+    candidates = [sentences[i] for i in idx_candidates]
+
+    # 1.2) keyword polarity on candidates
     neg_kw = req.get("negative_keywords", [])
     require_neg = bool(req.get("require_negative_polarity", False))
 
-    # positive hits on candidates
-    has_pos = any(contains_keywords(s, req.get("keywords", [])) for s in candidates)
-    # negative blockers: check candidates first (strict), plus a light transcript-wide guard
-    has_neg = any(contains_keywords(s, neg_kw) for s in candidates) or contains_keywords(agent_text, neg_kw)
-
-    # enforce polarity: only count kw if positive and NOT negative
+    has_pos = any(contains_keywords(sentences[i], req.get("keywords", [])) for i in idx_candidates)
+    has_neg = any(contains_keywords(sentences[i], neg_kw) for i in idx_candidates) or contains_keywords(agent_text, neg_kw)
     kw_ok = (has_pos and not has_neg) if not require_neg else (has_pos and not has_neg)
 
     kw_score_unit = 1.0 if kw_ok else 0.0
-    kw_score = w_kw * kw_score_unit  # keep contribution scaled by w_kw
+    kw_score = w_kw * kw_score_unit
 
-    # 2) semantic similarity; drop contradictory lines from similarity/evidence when negative_keywords exist
-    if neg_kw:
-        filtered_candidates = [s for s in candidates if not contains_keywords(s, neg_kw)]
-    else:
-        filtered_candidates = candidates
+    # 2) similarity on filtered candidates (remove negatives for evidence/sim)
+    def not_negative(i: int) -> bool:
+        return not contains_keywords(sentences[i], neg_kw) if neg_kw else True
+
+    filtered_idx = [i for i in idx_candidates if not_negative(i)]
+    if not filtered_idx:
+        filtered_idx = idx_candidates
+
+    filtered_candidates = [sentences[i] for i in filtered_idx]
 
     sim = max_similarity(filtered_candidates, req.get("canonical_examples", []), model)
     sim_unit = 0.0
     if sim >= policy_scoring.get("similarity_threshold_strong", 0.75):
-        sim_unit = 1.0  # strong hit
+        sim_unit = 1.0
     elif sim >= policy_scoring.get("similarity_threshold_ok", 0.60):
-        sim_unit = 0.5  # ok hit
+        sim_unit = 0.5
     sim_score = w_sim * sim_unit
 
-    # 3) LLM extractor (true/unclear/false) with weight from YAML
+    # 3) LLM extractor
     flag = (extractor_flags or {}).get(req["id"], "unclear")
-    llm_unit = {"true": 1.0, "unclear": 0.3333333333}.get(flag, 0.0)  # scale to [0..1]
+    llm_unit = {"true": 1.0, "unclear": 0.3333333333}.get(flag, 0.0)
     llm_score = w_llm * llm_unit
 
-    # per-requirement weight multiplier (unchanged)
+    # 4) total with per-requirement weight
     weight = float(req.get("weight", 0.15))
     total = (kw_score + sim_score + llm_score) * weight
 
-    # evidence (use filtered candidates to avoid off-topic/contradictory picks)
-    top_sents = top_matching_sentences(filtered_candidates, req.get("canonical_examples", []), model, top_k=3)
-    evidence = [{"quote": s, "start_ms": None, "end_ms": None} for s, _ in top_sents[:3]]
+    # 5) evidence with timestamps from filtered_idx
+    top_pairs = top_matching_sentences(filtered_candidates, req.get("canonical_examples", []), model, top_k=3)
+    # map sentence -> a source index in filtered_idx
+    sent_to_indices = {}
+    for j, s in enumerate(filtered_candidates):
+        sent_to_indices.setdefault(s, []).append(filtered_idx[j])
+
+    evidence = []
+    for s, _score in top_pairs[:3]:
+        src_idx_list = sent_to_indices.get(s)
+        if src_idx_list:
+            src_idx = src_idx_list[0]
+            st, en = sentence_times[src_idx] if 0 <= src_idx < len(sentence_times) else (None, None)
+        else:
+            st, en = (None, None)
+        evidence.append({"quote": s, "start_ms": st, "end_ms": en})
 
     debug = {
-        "kw": kw_score_unit,      # unit score before weights (for transparency)
-        "sim": sim,               # raw cosine max
-        "sim_score": sim_score,   # weighted contribution
-        "llm": llm_score,         # weighted contribution
+        "kw": kw_score_unit,
+        "sim": sim,
+        "sim_score": sim_score,
+        "llm": llm_score,
         "top_sentences": evidence
     }
     return total, debug, evidence
+
 
 def aggregate_score(agent_text: str, extractor_flags: Dict[str, str], policy: Dict[str, Any], model: SentenceTransformer):
     total = 0.0

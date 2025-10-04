@@ -40,11 +40,34 @@
   </form>
 </section>
 
+<section class="card">
+  <audio id="player" controls style="width:100%"></audio>
+  <div class="small">Tip: click a timestamp in the evidence list to jump here.</div>
+</section>
+
 <section id="result"></section>
 
 <script>
 const form = document.getElementById('upload-form');
 const resultEl = document.getElementById('result');
+const fileInput = document.getElementById('audio');
+const player = document.getElementById('player');
+
+function msToMMSS(ms) {
+  if (ms == null || isNaN(ms)) return '';
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m.toString().padStart(2,'0')}:${r.toString().padStart(2,'0')}`;
+}
+
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files[0];
+  if (f) {
+    const url = URL.createObjectURL(f);
+    player.src = url;
+  }
+});
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -65,7 +88,12 @@ form.addEventListener('submit', async (e) => {
   let breakdownHtml = '';
   for (const [k,v] of Object.entries(j.breakdown)) {
     const ev = j.evidence[k] || [];
-    const quotes = ev.map(e => `<li>"${e.quote}"</li>`).join('');
+    const quotes = ev.map(e => {
+      const ts = (e.start_ms !== null && e.start_ms !== undefined) ? msToMMSS(e.start_ms) : '';
+      const tsHtml = ts ? `<button type="button" class="jump" data-start="${Math.floor((e.start_ms||0)/1000)}">${ts}</button>` : '';
+      const q = (e.quote || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return `<li>${tsHtml} <span>"${q}"</span></li>`;
+    }).join('');
     breakdownHtml += `
       <div class="card">
         <h4>${k}</h4>
@@ -94,6 +122,15 @@ form.addEventListener('submit', async (e) => {
     ${breakdownHtml}
     <div class="card"><pre>${JSON.stringify(j, null, 2)}</pre></div>
   `;
+  // Enable click-to-seek on timestamp buttons
+  resultEl.querySelectorAll('button.jump').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const startSec = parseInt(btn.getAttribute('data-start') || '0', 10);
+      if (!isNaN(startSec)) {
+        try { player.currentTime = startSec; player.play(); } catch (_) {}
+      }
+    });
+  });
 });
 </script>
 

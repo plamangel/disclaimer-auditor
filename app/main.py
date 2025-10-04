@@ -12,7 +12,7 @@ from .policy_loader import load_policy
 from .transcribe import transcribe_audio
 from .llm_extractor import extract_flags
 from .scoring import aggregate_score
-from .utils import redact_pii
+from .utils import redact_pii, split_sentences_with_times
 from sentence_transformers import SentenceTransformer
 
 load_dotenv()
@@ -50,17 +50,34 @@ async def analyze(file: UploadFile = File(...), language: str | None = Form(None
     with open(temp_path, "wb") as f:
         f.write(await file.read())
 
-    # Transcribe
-    transcript = transcribe_audio(temp_path, language=language)
+    # Transcribe (returns dict with transcript + segments)
+    tr = transcribe_audio(temp_path, language=language)
+    transcript_text = tr.get("transcript", "")
+    segments = tr.get("segments", [])  # list of {text, start, end} (seconds)
 
-    # Redact PII (for safety before LLMs)
-    redacted = redact_pii(transcript)
+    # Redact PII in transcript and segments
+    redacted_text = redact_pii(transcript_text)
+    redacted_segments = []
+    for seg in segments:
+        redacted_segments.append({
+            "text": redact_pii(seg.get("text", "")),
+            "start": float(seg.get("start", 0.0)),
+            "end": float(seg.get("end", 0.0)),
+        })
 
-    # Extract flags via LLM (optional)
-    flags = extract_flags(redacted, policy)
+    # Build sentence-time bundle (ms) for scoring
+    sentences, times = split_sentences_with_times(redacted_segments)
 
-    # Score
-    total, verdict, breakdown, evidence_map = aggregate_score(redacted, flags, policy, embed_model)
+    # Inject bundle into scoring config (without mutating the loaded policy)
+    scoring_cfg = dict(policy.get("scoring", {}))
+    scoring_cfg["_sentence_times_bundle"] = {"sentences": sentences, "times": times}
+    policy_for_scoring = {"requirements": policy["requirements"], "scoring": scoring_cfg}
+
+    # Extract flags via LLM (optional) using redacted text only
+    flags = extract_flags(redacted_text, policy)
+
+    # Score using sentence-time bundle
+    total, verdict, breakdown, evidence_map = aggregate_score(redacted_text, flags, policy_for_scoring, embed_model)
 
     # Persist JSON result
     result = {
@@ -70,7 +87,9 @@ async def analyze(file: UploadFile = File(...), language: str | None = Form(None
         "verdict": verdict,
         "breakdown": breakdown,
         "evidence": evidence_map,
-        "transcript_chars": len(redacted),
+        "transcript": redacted_text,
+        "segments": redacted_segments,
+        "transcript_chars": len(redacted_text),
         "model_info": {
             "whisper_model": os.environ.get("WHISPER_MODEL","base"),
             "embedding_model": "paraphrase-multilingual-MiniLM-L12-v2",
@@ -85,6 +104,6 @@ async def analyze(file: UploadFile = File(...), language: str | None = Form(None
     # Append to CSV index
     with open(INDEX_CSV, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([fid, file.filename, round(total,3), verdict, len(redacted)])
+        writer.writerow([fid, file.filename, round(total,3), verdict, len(redacted_text)])
 
     return JSONResponse(result)
