@@ -1,46 +1,80 @@
+# app/transcribe.py
 import os
 from typing import Any, Dict, List, Optional
-import whisper
+from faster_whisper import WhisperModel
+import ctranslate2
+
+_model = None
+
+def _pick_compute_type(device: str) -> str:
+    """
+    Choose a supported compute_type for the current device.
+    Preference order: int8_float16 -> int8 -> float16 -> float32.
+    Falls back safely if not supported.
+    """
+    requested = os.environ.get("WHISPER_COMPUTE", "").strip()  # optional manual override
+    supported = set(ctranslate2.get_supported_compute_types(device or "cpu"))
+
+    if requested:
+        if requested in supported:
+            return requested
+        # if unsupported, continue to auto-pick
+
+    for ct in ("int8_float16", "int8", "float16", "float32"):
+        if ct in supported:
+            return ct
+    return "float32"
+
+def _get_model():
+    global _model
+    if _model is None:
+        model_name = os.environ.get("WHISPER_MODEL", "small")
+        device = os.environ.get("WHISPER_DEVICE", "cpu").lower()
+        compute_type = _pick_compute_type(device)
+        _model = WhisperModel(model_name, device=device, compute_type=compute_type)
+    return _model
 
 def transcribe_audio(file_path: str, language: Optional[str] = None) -> Dict[str, Any]:
     """
-    Transcribe an audio file with Whisper and return:
+    Transcribe an audio file with faster-whisper and return:
       {
         "transcript": str,
         "segments": [{"text": str, "start": float, "end": float}, ...],
-        "model_info": {"model": str, "device": str, "fp16": bool}
+        "model_info": {"model": str, "device": str, "compute_type": str}
       }
     """
-    model_name = os.environ.get("WHISPER_MODEL", "base")
-    model = whisper.load_model(model_name)
-
-    # Use FP32 on CPU (avoids the usual warning and speeds up a bit on Macs without GPU)
-    use_fp16 = (getattr(model, "device", None) is not None and str(model.device).startswith("cuda"))
-    result = model.transcribe(
+    model = _get_model()
+    segments, info = model.transcribe(
         file_path,
         language=language,
-        verbose=False,
-        fp16=use_fp16,
-        # word_timestamps=False  # sentence-level timestamps are enough for our use-case
+        beam_size=1,
+        vad_filter=True,
     )
 
-    segments: List[Dict[str, Any]] = []
-    for seg in (result.get("segments") or []):
-        segments.append({
-            "text": (seg.get("text") or "").strip(),
-            "start": float(seg.get("start", 0.0)),  # seconds
-            "end": float(seg.get("end", 0.0)),      # seconds
+    segs: List[Dict[str, Any]] = []
+    full_text_parts: List[str] = []
+    for s in segments:
+        text = (s.text or "").strip()
+        if not text:
+            continue
+        segs.append({
+            "text": text,
+            "start": float(s.start),
+            "end": float(s.end),
         })
+        full_text_parts.append(text)
 
-    full_text = (result.get("text") or "").strip()
+    full_text = " ".join(full_text_parts).strip()
 
-    out: Dict[str, Any] = {
+    device = os.environ.get("WHISPER_DEVICE", "cpu").lower()
+    compute_type = _pick_compute_type(device)
+
+    return {
         "transcript": full_text,
-        "segments": segments,
+        "segments": segs,
         "model_info": {
-            "model": model_name,
-            "device": str(getattr(model, "device", "cpu")),
-            "fp16": use_fp16,
+            "model": os.environ.get("WHISPER_MODEL", "small"),
+            "device": device,
+            "compute_type": compute_type,
         },
     }
-    return out

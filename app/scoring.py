@@ -98,6 +98,37 @@ def max_similarity(agent_sents: List[str], canon_examples: List[str], model: Sen
     return float(sims.max())
 
 
+# -------- Preencoded similarity helpers --------
+
+def max_similarity_preencoded(sent_emb: np.ndarray, idx_list: List[int], ex_emb: np.ndarray) -> float:
+    """Compute max cosine similarity using pre-normalized embeddings.
+    sent_emb: [num_sents, dim], ex_emb: [num_examples, dim]
+    """
+    if sent_emb is None or ex_emb is None:
+        return 0.0
+    if not isinstance(sent_emb, np.ndarray) or not isinstance(ex_emb, np.ndarray):
+        return 0.0
+    if ex_emb.size == 0 or len(idx_list) == 0:
+        return 0.0
+    cand = sent_emb[idx_list]  # [k, dim]
+    sims = cand @ ex_emb.T     # cosine if both are normalized
+    return float(np.max(sims))
+
+
+def top_by_similarity_preencoded(sentences: List[str], sent_emb: np.ndarray, idx_list: List[int], ex_emb: np.ndarray, top_k: int = 3):
+    if sent_emb is None or ex_emb is None:
+        return []
+    if not isinstance(sent_emb, np.ndarray) or not isinstance(ex_emb, np.ndarray):
+        return []
+    if ex_emb.size == 0 or len(idx_list) == 0:
+        return []
+    cand = sent_emb[idx_list]
+    sims = cand @ ex_emb.T  # [k, m]
+    max_per = np.max(sims, axis=1)  # [k]
+    order = np.argsort(-max_per)[:top_k]
+    return [(sentences[idx_list[i]], float(max_per[i])) for i in order]
+
+
 # -----------------------------
 # Scoring (anchors + YAML weights support)
 # -----------------------------
@@ -118,6 +149,9 @@ def score_requirement(req: Dict[str, Any], agent_text: str, extractor_flags: Dic
         sentences = split_sentences(agent_text)
         sentence_times = [(None, None) for _ in sentences]
 
+    pre = policy_scoring.get("_pre_encoded") if isinstance(policy_scoring, dict) else None
+    sent_emb = pre.get("sent_emb") if isinstance(pre, dict) else None
+
     # 1.1) anchor-based candidate indices
     anchors = (req or {}).get("anchors", [])
     idx_candidates = select_candidates(sentences, anchors, max_candidates=128)
@@ -134,6 +168,10 @@ def score_requirement(req: Dict[str, Any], agent_text: str, extractor_flags: Dic
     kw_score_unit = 1.0 if kw_ok else 0.0
     kw_score = w_kw * kw_score_unit
 
+    # Example embeddings (precomputed at policy load). Convert to ndarray for fast math.
+    ex_emb_list = req.get("_ex_emb") or []
+    ex_emb = np.array(ex_emb_list, dtype=float) if ex_emb_list else np.zeros((0, 0), dtype=float)
+
     # 2) similarity on filtered candidates (remove negatives for evidence/sim)
     def not_negative(i: int) -> bool:
         return not contains_keywords(sentences[i], neg_kw) if neg_kw else True
@@ -144,7 +182,12 @@ def score_requirement(req: Dict[str, Any], agent_text: str, extractor_flags: Dic
 
     filtered_candidates = [sentences[i] for i in filtered_idx]
 
-    sim = max_similarity(filtered_candidates, req.get("canonical_examples", []), model)
+    if isinstance(sent_emb, np.ndarray) and ex_emb.size > 0:
+        sim = max_similarity_preencoded(sent_emb, filtered_idx, ex_emb)
+    else:
+        # Fallback to on-the-fly encoding if preencoded not available
+        sim = max_similarity([sentences[i] for i in filtered_idx], req.get("canonical_examples", []), model)
+
     sim_unit = 0.0
     if sim >= policy_scoring.get("similarity_threshold_strong", 0.75):
         sim_unit = 1.0
@@ -162,7 +205,11 @@ def score_requirement(req: Dict[str, Any], agent_text: str, extractor_flags: Dic
     total = (kw_score + sim_score + llm_score) * weight
 
     # 5) evidence with timestamps from filtered_idx
-    top_pairs = top_matching_sentences(filtered_candidates, req.get("canonical_examples", []), model, top_k=3)
+    if isinstance(sent_emb, np.ndarray) and ex_emb.size > 0:
+        top_pairs = top_by_similarity_preencoded(sentences, sent_emb, filtered_idx, ex_emb, top_k=3)
+    else:
+        top_pairs = top_matching_sentences(filtered_candidates, req.get("canonical_examples", []), model, top_k=3)
+
     # map sentence -> a source index in filtered_idx
     sent_to_indices = {}
     for j, s in enumerate(filtered_candidates):

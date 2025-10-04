@@ -1,6 +1,7 @@
 import os
 import csv
 import uuid
+import asyncio
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -51,7 +52,8 @@ async def analyze(file: UploadFile = File(...), language: str | None = Form(None
         f.write(await file.read())
 
     # Transcribe (returns dict with transcript + segments)
-    tr = transcribe_audio(temp_path, language=language)
+    loop = asyncio.get_running_loop()
+    tr = await loop.run_in_executor(None, lambda: transcribe_audio(temp_path, language=language))
     transcript_text = tr.get("transcript", "")
     segments = tr.get("segments", [])  # list of {text, start, end} (seconds)
 
@@ -68,9 +70,14 @@ async def analyze(file: UploadFile = File(...), language: str | None = Form(None
     # Build sentence-time bundle (ms) for scoring
     sentences, times = split_sentences_with_times(redacted_segments)
 
+    # Pre-encode all sentences once for faster similarity scoring
+    # (used by scoring.py via the _pre_encoded bridge)
+    sent_emb = embed_model.encode(sentences, normalize_embeddings=True)
+
     # Inject bundle into scoring config (without mutating the loaded policy)
     scoring_cfg = dict(policy.get("scoring", {}))
     scoring_cfg["_sentence_times_bundle"] = {"sentences": sentences, "times": times}
+    scoring_cfg["_pre_encoded"] = {"sentences": sentences, "sent_emb": sent_emb}
     policy_for_scoring = {"requirements": policy["requirements"], "scoring": scoring_cfg}
 
     # Extract flags via LLM (optional) using redacted text only
