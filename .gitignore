@@ -31,3 +31,6 @@ outputs/
 # Temporary files
 *.tmp
 *.bak
+
+# HuggingFace model cache
+~/.cache/huggingface/

@@ -47,8 +47,12 @@ def transcribe_audio(file_path: str, language: Optional[str] = None) -> Dict[str
     segments, info = model.transcribe(
         file_path,
         language=language,
-        beam_size=1,
         vad_filter=True,
+        # Deterministic settings
+        beam_size=1,                 # no alternative beams
+        best_of=1,                   # disable multi-sample search
+        temperature=0.0,             # no sampling randomness
+        compression_ratio_threshold=None,  # avoid heuristic early-exit variability
     )
 
     segs: List[Dict[str, Any]] = []

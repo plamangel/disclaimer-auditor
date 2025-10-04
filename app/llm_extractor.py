@@ -83,7 +83,10 @@ def _ollama_extract(text: str, policy: Dict[str, Any], model_name: str) -> Optio
                 "options": {
                     "num_predict": 160,      # small, enough for 6 keys
                     "temperature": 0,
+                    "top_p": 1,
+                    "repeat_penalty": 1.0,
                     "num_ctx": 2048,
+                    "seed": 42,              # deterministic across runs
                     "stop": ["\n\nEND"],
                 },
             },
@@ -121,7 +124,8 @@ def _openai_extract(text: str, policy: Dict[str, Any]) -> Optional[Dict[str, str
 def extract_flags(agent_text: str, policy: Dict[str, Any]) -> Dict[str, str]:
     # simple cache key: transcript + policy_name
     policy_name = policy.get("policy_name", "")
-    key = make_key(agent_text, policy_name)
+    model_tag = os.environ.get("OLLAMA_MODEL", "").strip() or os.environ.get("OPENAI_MODEL", OPENAI_MODEL_DEFAULT)
+    key = make_key(agent_text, f"{policy_name}|{model_tag}")
     cached = get_cached(key)
     if isinstance(cached, dict) and cached:
         # cache hit

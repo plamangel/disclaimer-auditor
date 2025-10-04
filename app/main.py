@@ -2,6 +2,7 @@ import os
 import csv
 import uuid
 import asyncio
+import json
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,7 +16,7 @@ from .policy_loader import load_policy
 from .transcribe import transcribe_audio
 from .llm_extractor import extract_flags
 from .scoring import aggregate_score
-from .utils import redact_pii, split_sentences_with_times
+from .utils import redact_pii, split_sentences_with_times, file_sha256
 
 load_dotenv()
 
@@ -69,6 +70,14 @@ async def analyze(
     temp_path = os.path.join(OUTPUT_DIR, f"{fid}_{audio.filename}")
     with open(temp_path, "wb") as f:
         f.write(await audio.read())
+
+    # Compute a stable digest and try full-pipeline cache
+    digest = file_sha256(temp_path)
+    cache_out = os.path.join(OUTPUT_DIR, f"{digest}.json")
+    if os.path.exists(cache_out):
+        with open(cache_out, "r", encoding="utf-8") as f:
+            cached = json.load(f)
+        return JSONResponse(cached)
 
     # Transcribe (returns dict with transcript + segments)
     with timed("STT"):
@@ -128,8 +137,10 @@ async def analyze(
         }
     }
     json_path = os.path.join(OUTPUT_DIR, f"{fid}.json")
-    import json
     with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+    # Persist digest-based cache for identical files
+    with open(cache_out, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     # Append to CSV index

@@ -175,5 +175,9 @@ scoring:
     llm: 0.4
   similarity_threshold_ok: 0.55
   similarity_threshold_strong: 0.70
-  pass_threshold: 85
-  review_threshold: 70
+  epsilon: 0.001
+  pass_threshold: 0.85
+  review_threshold: 0.70
+
+
+  

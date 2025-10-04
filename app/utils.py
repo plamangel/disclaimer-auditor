@@ -1,4 +1,5 @@
 import re
+import hashlib
 from typing import List, Tuple, Dict, Any
 
 SENT_SPLIT_RE = re.compile(r'(?<=[\.!\?])\s+')
@@ -51,3 +52,15 @@ def split_sentences(text: str) -> List[str]:
     # naive splitter; consider spacy for higher quality
     parts = re.split(r'[.!?\n]+', text)
     return [p.strip() for p in parts if p.strip()]
+
+
+def file_sha256(path: str, chunk_size: int = 1024 * 1024) -> str:
+    """
+    Compute a stable SHA-256 digest of a file by reading it in chunks (default 1MB).
+    Used to cache full-pipeline results for identical audio inputs.
+    """
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(chunk_size), b""):
+            h.update(chunk)
+    return h.hexdigest()
